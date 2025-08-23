@@ -1,0 +1,168 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库服务
+  postgres:
+    image: postgres:15-alpine
+    container_name: ruoyi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ry_vue
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ruoyi123
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../sql/postgres/postgres_ry_vue_5.X.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ../sql/postgres/postgres_ry_job.sql:/docker-entrypoint-initdb.d/02-job.sql
+      - ../sql/postgres/postgres_ry_workflow.sql:/docker-entrypoint-initdb.d/03-workflow.sql
+    networks:
+      - ruoyi-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ry_vue"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis 缓存服务
+  redis:
+    image: redis:7-alpine
+    container_name: ruoyi-redis
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ruoyi123 --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis/conf/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - ruoyi-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MinIO 对象存储服务
+  minio:
+    image: minio/minio:latest
+    container_name: ruoyi-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ruoyi
+      MINIO_ROOT_PASSWORD: ruoyi123456
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - ruoyi-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MySQL 备用数据库服务
+  mysql:
+    image: mysql:8.0
+    container_name: ruoyi-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ruoyi123
+      MYSQL_DATABASE: ry-vue
+      MYSQL_USER: ruoyi
+      MYSQL_PASSWORD: ruoyi123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../sql/ry_vue_5.X.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ../sql/ry_job.sql:/docker-entrypoint-initdb.d/02-job.sql
+      - ../sql/ry_workflow.sql:/docker-entrypoint-initdb.d/03-workflow.sql
+    command: --default-authentication-plugin=mysql_native_password
+    networks:
+      - ruoyi-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx 反向代理服务
+  nginx:
+    image: nginx:alpine
+    container_name: ruoyi-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf/nginx.conf:/etc/nginx/nginx.conf
+      - nginx_logs:/var/log/nginx
+    networks:
+      - ruoyi-network
+    depends_on:
+      - postgres
+      - redis
+      - minio
+
+  # RuoYi 后端应用服务
+  ruoyi-app:
+    build:
+      context: ../../
+      dockerfile: script/docker/Dockerfile
+    container_name: ruoyi-app
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_URL: jdbc:postgresql://postgres:5432/ry_vue?useUnicode=true&characterEncoding=utf8&useSSL=false&autoReconnect=true&reWriteBatchedInserts=true
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_USERNAME: postgres
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_PASSWORD: ruoyi123
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ruoyi123
+    ports:
+      - "8080:8080"
+    volumes:
+      - app_logs:/ruoyi/logs
+      - app_temp:/ruoyi/temp
+    networks:
+      - ruoyi-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+  mysql_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  app_logs:
+    driver: local
+  app_temp:
+    driver: local
+
+networks:
+  ruoyi-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
