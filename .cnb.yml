@@ -1,0 +1,302 @@
+# RuoYi-Vue-Plus Cloud Native Buildpacks 配置文件
+# 支持全量包和单一升级包两种部署模式
+# 版本: 5.4.1
+# 创建时间: 2025-08-24
+
+# 项目元信息
+project:
+  name: ruoyi-vue-plus
+  version: 5.4.1
+  description: "Dromara RuoYi-Vue-Plus多租户管理系统"
+  maintainer: "Dromara Team"
+
+# CNB构建器配置
+builder: paketobuildpacks/builder:base
+
+# 构建包配置
+buildpacks:
+  - paketo-buildpacks/ca-certificates
+  - paketo-buildpacks/bellsoft-liberica
+  - paketo-buildpacks/maven
+  - paketo-buildpacks/executable-jar
+  - paketo-buildpacks/spring-boot
+  - paketo-buildpacks/image-labels
+
+# 环境变量配置
+env:
+  # Java运行时配置
+  - name: BP_JVM_VERSION
+    value: "17"
+  - name: BP_JVM_TYPE
+    value: "JRE"
+  - name: JAVA_TOOL_OPTIONS
+    value: "-Xms512m -Xmx1024m -XX:+UseG1GC -XX:+UseContainerSupport"
+  
+  # Maven构建配置
+  - name: BP_MAVEN_BUILD_ARGUMENTS
+    value: "clean package -DskipTests=true -Pprod"
+  - name: BP_MAVEN_BUILT_MODULE
+    value: "ruoyi-admin"
+  - name: BP_MAVEN_BUILT_ARTIFACT
+    value: "ruoyi-admin/target/ruoyi-admin.jar"
+  
+  # Spring Boot配置
+  - name: BPL_SPRING_CLOUD_BINDINGS_DISABLED
+    value: "false"
+  - name: BP_SPRING_CLOUD_BINDINGS_DISABLED
+    value: "false"
+  
+  # 应用配置
+  - name: SERVER_PORT
+    value: "8080"
+  - name: SPRING_PROFILES_ACTIVE
+    value: "prod"
+  - name: TZ
+    value: "Asia/Shanghai"
+
+# 部署模式配置
+deployment:
+  # 全量部署模式 - 当commit消息包含[FULL]时触发
+  full:
+    enabled: true
+    trigger_pattern: "\\[FULL\\]"
+    components:
+      - database
+      - redis
+      - minio
+      - monitoring
+      - application
+    
+  # 增量部署模式 - 根据commit消息中的标签触发对应模块
+  incremental:
+    enabled: true
+    modules:
+      backend:
+        trigger_pattern: "\\[BACKEND\\]"
+        components: ["application"]
+      database:
+        trigger_pattern: "\\[DB\\]|\\[DB-MYSQL\\]|\\[DB-POSTGRES\\]"
+        components: ["database"]
+      redis:
+        trigger_pattern: "\\[REDIS\\]"
+        components: ["redis"]
+      minio:
+        trigger_pattern: "\\[MINIO\\]"
+        components: ["minio"]
+      monitoring:
+        trigger_pattern: "\\[MONITOR\\]"
+        components: ["monitoring"]
+
+# 基础设施组件配置
+infrastructure:
+  # 数据库配置
+  database:
+    mysql:
+      image: "mysql:8.0.42"
+      port: 3306
+      environment:
+        MYSQL_ROOT_PASSWORD: "root"
+        MYSQL_DATABASE: "ry-vue"
+        TZ: "Asia/Shanghai"
+      volumes:
+        - "/docker/mysql/data:/var/lib/mysql"
+        - "/docker/mysql/conf:/etc/mysql/conf.d"
+    
+    postgresql:
+      image: "postgres:15"
+      port: 5432
+      environment:
+        POSTGRES_DB: "ry_vue"
+        POSTGRES_USER: "postgres"
+        POSTGRES_PASSWORD: "ruoyi123"
+        TZ: "Asia/Shanghai"
+      volumes:
+        - "/docker/postgres/data:/var/lib/postgresql/data"
+        - "/docker/postgres/conf:/etc/postgresql"
+  
+  # Redis缓存配置
+  redis:
+    image: "redis:7.2.8"
+    port: 6379
+    environment:
+      TZ: "Asia/Shanghai"
+    volumes:
+      - "/docker/redis/conf:/redis/config"
+      - "/docker/redis/data:/redis/data"
+    command: "redis-server /redis/config/redis.conf"
+  
+  # MinIO对象存储配置
+  minio:
+    image: "minio/minio:RELEASE.2025-04-22T22-12-26Z"
+    ports:
+      api: 9000
+      console: 9001
+    environment:
+      MINIO_ROOT_USER: "ruoyi"
+      MINIO_ROOT_PASSWORD: "ruoyi123"
+      MINIO_COMPRESS: "off"
+      TZ: "Asia/Shanghai"
+    volumes:
+      - "/docker/minio/data:/data"
+      - "/docker/minio/config:/root/.minio"
+    command: "server --address ':9000' --console-address ':9001' /data"
+  
+  # 监控系统配置
+  monitoring:
+    prometheus:
+      image: "prom/prometheus:latest"
+      port: 9090
+      volumes:
+        - "./script/cnb/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml"
+        - "/docker/prometheus/data:/prometheus"
+    
+    grafana:
+      image: "grafana/grafana:latest"
+      port: 3000
+      environment:
+        GF_SECURITY_ADMIN_PASSWORD: "admin123"
+        TZ: "Asia/Shanghai"
+      volumes:
+        - "/docker/grafana/data:/var/lib/grafana"
+        - "./script/cnb/monitoring/grafana:/etc/grafana/provisioning"
+
+# CI/CD流水线配置
+pipeline:
+  stages:
+    # 代码检出阶段
+    checkout:
+      enabled: true
+      git_depth: 1
+    
+    # 编译阶段
+    compile:
+      enabled: true
+      command: "mvn clean compile -DskipTests=true"
+      cache_paths:
+        - ".m2/repository"
+    
+    # 单元测试阶段
+    test:
+      enabled: true
+      command: "mvn test"
+      reports:
+        junit: "target/surefire-reports/TEST-*.xml"
+        coverage: "target/site/jacoco/jacoco.xml"
+    
+    # 构建阶段
+    build:
+      enabled: true
+      command: "mvn package -DskipTests=true -Pprod"
+      artifacts:
+        - "ruoyi-admin/target/ruoyi-admin.jar"
+    
+    # Docker镜像构建阶段
+    docker_build:
+      enabled: true
+      registry: "registry.cn-hangzhou.aliyuncs.com"
+      namespace: "ruoyi-vue-plus"
+      image_name: "ruoyi-server"
+      tags:
+        - "latest"
+        - "${BUILD_NUMBER}"
+        - "v${PROJECT_VERSION}"
+    
+    # 数据库迁移验证阶段
+    database_migration:
+      enabled: true
+      scripts_path: "./script/sql"
+      validation_queries:
+        - "SELECT COUNT(*) FROM sys_user"
+        - "SELECT COUNT(*) FROM sys_menu"
+    
+    # 部署阶段
+    deploy:
+      enabled: true
+      health_check:
+        endpoint: "/actuator/health"
+        timeout: 300
+        retries: 10
+      
+      # 部署验证
+      verification:
+        - name: "应用启动检查"
+          command: "curl -f http://localhost:8080/actuator/health"
+        - name: "数据库连接检查"
+          command: "curl -f http://localhost:8080/actuator/health/db"
+        - name: "Redis连接检查"
+          command: "curl -f http://localhost:8080/actuator/health/redis"
+
+# 镜像标签和元数据
+labels:
+  - key: "org.opencontainers.image.title"
+    value: "RuoYi-Vue-Plus"
+  - key: "org.opencontainers.image.description"
+    value: "Dromara RuoYi-Vue-Plus多租户管理系统"
+  - key: "org.opencontainers.image.version"
+    value: "5.4.1"
+  - key: "org.opencontainers.image.created"
+    value: "{{.BuildTimestamp}}"
+  - key: "org.opencontainers.image.source"
+    value: "https://gitee.com/dromara/RuoYi-Vue-Plus"
+  - key: "org.opencontainers.image.vendor"
+    value: "Dromara"
+
+# 健康检查配置
+health_check:
+  enabled: true
+  interval: "30s"
+  timeout: "10s"
+  start_period: "60s"
+  retries: 3
+  test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+
+# 资源限制配置
+resources:
+  limits:
+    memory: "2Gi"
+    cpu: "1000m"
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+
+# 安全配置
+security:
+  run_as_non_root: true
+  run_as_user: 1000
+  run_as_group: 1000
+  read_only_root_filesystem: false
+  allow_privilege_escalation: false
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - NET_BIND_SERVICE
+
+# 网络配置
+network:
+  ports:
+    - name: "http"
+      container_port: 8080
+      protocol: "TCP"
+    - name: "management"
+      container_port: 8081
+      protocol: "TCP"
+
+# 存储卷配置
+volumes:
+  - name: "logs"
+    mount_path: "/ruoyi/logs"
+    type: "emptyDir"
+  - name: "temp"
+    mount_path: "/ruoyi/temp"
+    type: "emptyDir"
+  - name: "config"
+    mount_path: "/ruoyi/config"
+    type: "configMap"
+
+# 配置文件路径
+config_paths:
+  - "./script/cnb"
+  - "./script/cnb/monitoring"
+  - "./script/cnb/database"
+  - "./script/sql"

@@ -1,0 +1,241 @@
+# Prometheus 告警规则配置
+# RuoYi-Vue-Plus 系统告警规则
+
+groups:
+  # 应用服务告警组
+  - name: ruoyi-application-alerts
+    rules:
+      # 应用服务不可用告警
+      - alert: RuoyiServiceDown
+        expr: up{job="ruoyi-server"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: ruoyi-server
+        annotations:
+          summary: "RuoYi服务不可用"
+          description: "RuoYi服务 {{ $labels.instance }} 已停止运行超过1分钟"
+
+      # 应用响应时间过长告警
+      - alert: RuoyiHighResponseTime
+        expr: histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{job="ruoyi-server"}[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: ruoyi-server
+        annotations:
+          summary: "RuoYi服务响应时间过长"
+          description: "RuoYi服务 {{ $labels.instance }} 95%请求响应时间超过2秒，当前值: {{ $value }}秒"
+
+      # 应用错误率过高告警
+      - alert: RuoyiHighErrorRate
+        expr: rate(http_server_requests_seconds_count{job="ruoyi-server",status=~"5.."}[5m]) / rate(http_server_requests_seconds_count{job="ruoyi-server"}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: ruoyi-server
+        annotations:
+          summary: "RuoYi服务错误率过高"
+          description: "RuoYi服务 {{ $labels.instance }} 错误率超过5%，当前值: {{ $value | humanizePercentage }}"
+
+      # JVM 内存使用率过高告警
+      - alert: RuoyiHighMemoryUsage
+        expr: (jvm_memory_used_bytes{job="ruoyi-server",area="heap"} / jvm_memory_max_bytes{job="ruoyi-server",area="heap"}) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: ruoyi-server
+        annotations:
+          summary: "RuoYi服务内存使用率过高"
+          description: "RuoYi服务 {{ $labels.instance }} JVM堆内存使用率超过85%，当前值: {{ $value | humanizePercentage }}"
+
+      # JVM GC 时间过长告警
+      - alert: RuoyiHighGCTime
+        expr: rate(jvm_gc_collection_seconds_sum{job="ruoyi-server"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: ruoyi-server
+        annotations:
+          summary: "RuoYi服务GC时间过长"
+          description: "RuoYi服务 {{ $labels.instance }} GC时间占比超过10%，当前值: {{ $value | humanizePercentage }}"
+
+  # 数据库告警组
+  - name: database-alerts
+    rules:
+      # MySQL 服务不可用告警
+      - alert: MySQLDown
+        expr: up{job="mysql"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: mysql
+        annotations:
+          summary: "MySQL数据库不可用"
+          description: "MySQL数据库 {{ $labels.instance }} 已停止运行超过1分钟"
+
+      # MySQL 连接数过多告警
+      - alert: MySQLTooManyConnections
+        expr: mysql_global_status_threads_connected{job="mysql"} / mysql_global_variables_max_connections{job="mysql"} > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: mysql
+        annotations:
+          summary: "MySQL连接数过多"
+          description: "MySQL数据库 {{ $labels.instance }} 连接数使用率超过80%，当前值: {{ $value | humanizePercentage }}"
+
+      # MySQL 慢查询过多告警
+      - alert: MySQLSlowQueries
+        expr: rate(mysql_global_status_slow_queries{job="mysql"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: mysql
+        annotations:
+          summary: "MySQL慢查询过多"
+          description: "MySQL数据库 {{ $labels.instance }} 慢查询频率过高，当前值: {{ $value }}/秒"
+
+  # Redis 告警组
+  - name: redis-alerts
+    rules:
+      # Redis 服务不可用告警
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis服务不可用"
+          description: "Redis服务 {{ $labels.instance }} 已停止运行超过1分钟"
+
+      # Redis 内存使用率过高告警
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes{job="redis"} / redis_memory_max_bytes{job="redis"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis内存使用率过高"
+          description: "Redis服务 {{ $labels.instance }} 内存使用率超过90%，当前值: {{ $value | humanizePercentage }}"
+
+      # Redis 连接数过多告警
+      - alert: RedisTooManyConnections
+        expr: redis_connected_clients{job="redis"} > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis连接数过多"
+          description: "Redis服务 {{ $labels.instance }} 连接数超过100，当前值: {{ $value }}"
+
+  # MinIO 告警组
+  - name: minio-alerts
+    rules:
+      # MinIO 服务不可用告警
+      - alert: MinIODown
+        expr: up{job="minio"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: minio
+        annotations:
+          summary: "MinIO服务不可用"
+          description: "MinIO服务 {{ $labels.instance }} 已停止运行超过1分钟"
+
+      # MinIO 磁盘使用率过高告警
+      - alert: MinIOHighDiskUsage
+        expr: (minio_disk_storage_used_bytes{job="minio"} / minio_disk_storage_total_bytes{job="minio"}) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: minio
+        annotations:
+          summary: "MinIO磁盘使用率过高"
+          description: "MinIO服务 {{ $labels.instance }} 磁盘使用率超过85%，当前值: {{ $value | humanizePercentage }}"
+
+  # 系统资源告警组
+  - name: system-alerts
+    rules:
+      # 系统 CPU 使用率过高告警
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "系统CPU使用率过高"
+          description: "系统 {{ $labels.instance }} CPU使用率超过80%，当前值: {{ $value }}%"
+
+      # 系统内存使用率过高告警
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "系统内存使用率过高"
+          description: "系统 {{ $labels.instance }} 内存使用率超过85%，当前值: {{ $value | humanizePercentage }}"
+
+      # 系统磁盘使用率过高告警
+      - alert: HighDiskUsage
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "系统磁盘使用率过高"
+          description: "系统 {{ $labels.instance }} 磁盘 {{ $labels.mountpoint }} 使用率超过85%，当前值: {{ $value | humanizePercentage }}"
+
+      # 系统负载过高告警
+      - alert: HighSystemLoad
+        expr: node_load15 > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "系统负载过高"
+          description: "系统 {{ $labels.instance }} 15分钟平均负载超过2，当前值: {{ $value }}"
+
+  # 业务指标告警组
+  - name: business-alerts
+    rules:
+      # 用户登录失败率过高告警
+      - alert: HighLoginFailureRate
+        expr: rate(ruoyi_login_failure_total[5m]) / rate(ruoyi_login_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: ruoyi-business
+        annotations:
+          summary: "用户登录失败率过高"
+          description: "用户登录失败率超过10%，当前值: {{ $value | humanizePercentage }}"
+
+      # 在线用户数异常告警
+      - alert: AbnormalOnlineUsers
+        expr: ruoyi_online_users_count > 1000 or ruoyi_online_users_count < 1
+        for: 5m
+        labels:
+          severity: warning
+          service: ruoyi-business
+        annotations:
+          summary: "在线用户数异常"
+          description: "在线用户数异常，当前值: {{ $value }}"
+
+      # 数据库连接池使用率过高告警
+      - alert: HighDBConnectionPoolUsage
+        expr: hikaricp_connections_active / hikaricp_connections_max > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: ruoyi-business
+        annotations:
+          summary: "数据库连接池使用率过高"
+          description: "数据库连接池使用率超过80%，当前值: {{ $value | humanizePercentage }}"
