@@ -89,19 +89,9 @@ deployment:
 
 # 基础设施组件配置
 infrastructure:
-  # 数据库配置
+  # 数据库配置 - PostgreSQL为默认数据库
   database:
-    mysql:
-      image: "mysql:8.0.42"
-      port: 3306
-      environment:
-        MYSQL_ROOT_PASSWORD: "root"
-        MYSQL_DATABASE: "ry-vue"
-        TZ: "Asia/Shanghai"
-      volumes:
-        - "/docker/mysql/data:/var/lib/mysql"
-        - "/docker/mysql/conf:/etc/mysql/conf.d"
-    
+    # 主数据库 - PostgreSQL (默认)
     postgresql:
       image: "postgres:15"
       port: 5432
@@ -113,6 +103,20 @@ infrastructure:
       volumes:
         - "/docker/postgres/data:/var/lib/postgresql/data"
         - "/docker/postgres/conf:/etc/postgresql"
+      default: true
+    
+    # 备用数据库 - MySQL
+    mysql:
+      image: "mysql:8.0.42"
+      port: 3306
+      environment:
+        MYSQL_ROOT_PASSWORD: "root"
+        MYSQL_DATABASE: "ry-vue"
+        TZ: "Asia/Shanghai"
+      volumes:
+        - "/docker/mysql/data:/var/lib/mysql"
+        - "/docker/mysql/conf:/etc/mysql/conf.d"
+      default: false
   
   # Redis缓存配置
   redis:
